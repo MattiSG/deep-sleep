@@ -18,6 +18,7 @@ property isOnAC : ""
 property onLaunchMode : 1
 property usualMode : 0
 property safeList : {0, 1, 3, 5, 7}
+property needAuthentification : true
 
 property quickSleep : "Veille rapide"
 property safeSleep : "Veille sécurisée"
@@ -38,10 +39,10 @@ else
 end if
 
 (*Manage preferences*)
-set hasBeenInitialized to do shell script "ls ~/Library/Preferences/" & defaultsFile & ".plist > /dev/null 2>/dev/null; echo $?"
+set hasBeenInitialized to do shell script "ls ~/Library/Preferences/" & defaultsFile & ".plist > /dev/null 2>/dev/null; echo $?" --ls instead of defaults because it is faster
 if translateBool(hasBeenInitialized) then
 	getPrefs()
-	if execIsNotRoot() then
+	if execIsNotRoot() and not needAuthentification then
 		set choice to display dialog "L'exécutable Deep Sleep n'appartient plus au système alors qu'il le devrait. Il est grandement recommandé de télécharger à nouveau ce programme, pour plus de sécurité." buttons {"Modifier les droits", "Quitter"} default button 2 with title "ATTENTION" with icon stop
 		if choice is {button returned:"Modifier les droits"} then
 			setOwner()
@@ -69,17 +70,28 @@ else
 end if
 
 (*Let's roll !*)
-do shell script "\"" & execFile & "\" set " & getCode(onLaunchMode)
+if needAuthentification then
+	do shell script "\"" & execFile & "\" set " & getCode(onLaunchMode) with administrator privileges
+else
+	do shell script "\"" & execFile & "\" set " & getCode(onLaunchMode)
+end if
 tell application "System Events"
 	sleep
 end tell
 
 --following will be executed only when waking from sleep
 
-do shell script "\"" & execFile & "\" set " & getCode(usualMode)
-try
-	do shell script "\"" & execFile & "\" rm " & getTheVMFile()
-end try
+if needAuthentification then
+	do shell script "\"" & execFile & "\" set " & getCode(usualMode) with administrator privileges
+	try
+		do shell script "\"" & execFile & "\" rm " & getTheVMFile() with administrator privileges
+	end try
+else
+	do shell script "\"" & execFile & "\" set " & getCode(usualMode)
+	try
+		do shell script "\"" & execFile & "\" rm " & getTheVMFile()
+	end try
+end if
 
 quit
 
@@ -158,7 +170,7 @@ on getCode(wantedMode)
 	if code is in safeList then --just to be sure ;)
 		return code
 	else
-		error --will be attained only if no value is returned. I use this instead of an "else" to test if it is deepSleep in order to protect the hibernatemode to be corrupted
+		error --in order to protect the hibernatemode to be corrupted
 	end if
 end getCode
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -201,8 +213,14 @@ on getPrefs()
 		set onLaunchMode to do shell script "defaults read " & defaultsFile & " " & prefix & "onLaunchMode"
 		set usualMode to do shell script "defaults read " & defaultsFile & " " & prefix & "usualMode"
 	on error
-		display dialog "Les préférences de Deep Sleep sont illisibles. Veuillez choisir à nouveau vos préférences." with icon caution
+		display dialog "Les préférences de " & appName & " sont illisibles. Veuillez choisir à nouveau vos préférences." with icon caution
 		setPrefs()
+	end try
+	try
+		set needAuthentification to (do shell script "defaults read " & defaultsFile & " needAuthentification" as boolean)
+	on error
+		display dialog "Les préférences d'authentification de " & appName & " sont illisibles. Veuillez choisir à nouveau vos préférences." with icon caution
+		setOwner()
 	end try
 end getPrefs
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -218,14 +236,25 @@ on execIsNotRoot()
 end execIsNotRoot
 
 on setOwner()
-	set choice to display dialog "Souhaitez-vous autoriser " & appName & " à être systématiquement exécuté en tant qu'administrateur ?" & return & "Dans le cas contraire, votre mot de passe vous sera demandé à chaque fois." & return & return & "Votre mot de passe ne sera pas stocké en clair." buttons {"Plus d'infos", "OK"} default button 2 with icon theIcon
+	set choice to display dialog "Souhaitez-vous autoriser " & appName & " à être systématiquement exécuté en tant qu'administrateur ?" & return & "Dans le cas contraire, votre mot de passe vous sera demandé à chaque fois." & return & return & "Votre mot de passe ne sera pas stocké en clair." buttons {"Refuser", "Plus d'infos", "Autoriser"} default button 3 with icon theIcon
 	if choice is {button returned:"Plus d'infos"} then
-		display dialog appName & " va vous demander votre mot de passe, pour s'autoriser à modifier le propriétaire du programme. Ainsi, " & appName & " sera identifié comme appartenant au système, et aura systématiquement les droits administrateurs nécessaires pour modifier le mode de veille." buttons {"OK"} default button 1 with icon theIcon
+		set choice to display dialog appName & " va vous demander votre mot de passe, pour s'autoriser à modifier le propriétaire du programme. Ainsi, " & appName & " sera identifié comme appartenant au système, et aura systématiquement les droits administrateurs nécessaires pour modifier le mode de veille." buttons {"Refuser", "Autoriser"} default button 2 with icon theIcon
 	end if
+	if choice is {button returned:"Refuser"} then
+		do shell script "defaults write " & defaultsFile & " needAuthentification -bool TRUE"
+	else
+		makeExecFileRoot()
+		do shell script "defaults write " & defaultsFile & " needAuthentification -bool FALSE"
+	end if
+end setOwner
+
+on makeExecFileRoot()
 	do shell script "sudo chmod o+x '" & execFile & "'" with administrator privileges
 	set user to do shell script "whoami"
-	do shell script "su -c " & user & " 'sudo chown root:wheel \"" & execFile & "\" && sudo chmod u+s \"" & execFile & "\"'" with administrator privileges --thanks M. Beaumel (author of the Deep Sleep widget)
-end setOwner
+	display dialog user
+	--do shell script "/usr/bin/su " & user & " -c '/usr/bin/sudo /usr/sbin/chown root:wheel \"" & execFile & "\" && /usr/bin/sudo /bin/chmod u+s \"" & execFile & "\"'" with administrator privileges --thanks M. Beaumel (author of the Deep Sleep widget)
+	--/usr/bin/su " + name + " -c '/usr/bin/sudo /usr/sbin/chown root:wheel deepsleep && /usr/bin/sudo /bin/chmod u+s deepsleep'"
+end makeExecFileRoot
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 (*MISCELLANEOUS*)
