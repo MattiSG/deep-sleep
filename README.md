@@ -1,5 +1,8 @@
 # Let your Mac go to hibernation (deep sleep)
 
+![Full-width icon](icon/DeepSleep.png)
+![Finder action bar icon](icon/DeepSleep-Finder.png)
+
 Default Mac OS X sleep mode is to prepare hibernation (copy RAM to disk, constant light on) and go to light sleep (pulsing light). On laptops, after 10 to 20% of the battery has been drained in light sleep, the computer will switch to hibernation (longer time to wake up, but no battery drain at all). This behaviour is safe sleep.
 
 It is possible to set the preference to always go to light, deep or safe sleep. However, most of the time safe is okay, except for cases where you know you won't wake your laptop up for at least a couple hours and it would be more energy efficient to go straight to hibernation.
