@@ -1,14 +1,23 @@
 (*Author : Matti Schneider
 *)
-set appName to "Deep Sleep"
-set theVersion to "2.1ß"
-set theIcon to path to resource "DeepSleep.icns"
-set descriptionFile to path to resource "Manuel de Deep Sleep.rtfd"
+property appName : "Deep Sleep"
+property theVersion : "2.2ß"
+property theIcon : "DeepSleep.icns"
+property descriptionFile : "Manuel de Deep Sleep.rtfd"
+property execFile : "mattisgdeepsleep"
+property defaultsFile : "com.mattisg.deepsleep"
 
-property onLaunchMode : 1
-property usualMode : 0
+set theIcon to path to resource theIcon
+set descriptionFile to path to resource descriptionFile
+set execFile to path to resource execFile
+set execFile to do shell script "echo '" & (execFile as string) & "' | sed s@:@/@g"
+set execFile to "/Volumes/" & execFile --this one was tricky !
+
 property isLaptop : ""
 property isOnAC : ""
+property onLaunchMode : 1
+property usualMode : 0
+property safeList : {0, 1, 3, 5, 7}
 
 property quickSleep : "Veille rapide"
 property safeSleep : "Veille sécurisée"
@@ -29,13 +38,22 @@ else
 end if
 
 (*Manage preferences*)
-set hasBeenInitialized to do shell script "ls ~/Library/Preferences/com.mattisg.deepsleep.plist > /dev/null 2>/dev/null; echo $?"
+set hasBeenInitialized to do shell script "ls ~/Library/Preferences/" & defaultsFile & ".plist > /dev/null 2>/dev/null; echo $?"
 if translateBool(hasBeenInitialized) then
 	getPrefs()
+	if execIsNotRoot() then
+		set choice to display dialog "L'exécutable Deep Sleep n'appartient plus au système alors qu'il le devrait. Il est grandement recommandé de télécharger à nouveau ce programme, pour plus de sécurité." buttons {"Modifier les droits", "Quitter"} default button 2 with title "ATTENTION" with icon stop
+		if choice is {button returned:"Modifier les droits"} then
+			setOwner()
+		else
+			realQuit()
+		end if
+	end if
 else
 	set choice to display dialog appName & " permet de modifier le mode de veille par défaut, et d'en utiliser un alternatif." & return & "Vous allez à présent configurer les modes de veilles à utiliser." buttons {"Quitter", "Manuel", "Ok"} default button 3 with title appName & " " & theVersion with icon theIcon
 	if choice is {button returned:"Ok"} then
 		setPrefs()
+		setOwner()
 		set choice to display dialog "Parfait, il vous suffira à présent de lancer Deep Sleep pour passer en mode de veille alternatif." buttons {"OK"} default button 1 with icon theIcon
 		realQuit()
 	else
@@ -51,16 +69,16 @@ else
 end if
 
 (*Let's roll !*)
-do shell script "sudo pmset hibernatemode " & getCode(onLaunchMode) with administrator privileges
+do shell script "\"" & execFile & "\" set " & getCode(onLaunchMode)
 tell application "System Events"
 	sleep
 end tell
 
 --following will be executed only when waking from sleep
 
-do shell script "sudo pmset hibernatemode " & getCode(usualMode) with administrator privileges
+do shell script "\"" & execFile & "\" set " & getCode(usualMode)
 try
-	do shell script "sudo rm " & getTheVMFile() with administrator privileges
+	do shell script "\"" & execFile & "\" rm " & getTheVMFile()
 end try
 
 quit
@@ -127,16 +145,21 @@ end getTheVMFile
 
 
 on getCode(wantedMode)
+	set code to -1
 	if wantedMode is quickSleep then
-		return 0
+		set code to 0
 	end if
 	if wantedMode is safeSleep then
-		return 3 + getEncryptionState()
+		set code to (3 + getEncryptionState())
 	end if
 	if wantedMode is deepSleep then
-		return 1 + getEncryptionState()
+		set code to (1 + getEncryptionState())
 	end if
-	error --will be attained only if no value is returned. I use this instead of an "else" to test if it is deepSleep in order to protect the hibernatemode to be corrupted
+	if code is in safeList then --just to be sure ;)
+		return code
+	else
+		error --will be attained only if no value is returned. I use this instead of an "else" to test if it is deepSleep in order to protect the hibernatemode to be corrupted
+	end if
 end getCode
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -160,11 +183,11 @@ on setPrefs()
 		set Battery_parentheses to ""
 	end if
 
-	do shell script "defaults write com.mattisg.deepsleep AC_usualMode '" & chooseFromList("Choisissez le mode de veille à utiliser en temps normal" & AC_parentheses & " :", quickSleep) & "'"
-	do shell script "defaults write com.mattisg.deepsleep AC_onLaunchMode '" & chooseFromList("Choisissez le mode de veille à utiliser en lançant Deep Sleep" & AC_parentheses & " :", deepSleep) & "'"
+	do shell script "defaults write " & defaultsFile & " AC_usualMode '" & chooseFromList("Choisissez le mode de veille à utiliser en temps normal" & AC_parentheses & " :", quickSleep) & "'"
+	do shell script "defaults write " & defaultsFile & " AC_onLaunchMode '" & chooseFromList("Choisissez le mode de veille à utiliser en lançant Deep Sleep" & AC_parentheses & " :", deepSleep) & "'"
 	if isLaptop then
-		do shell script "defaults write com.mattisg.deepsleep Battery_usualMode '" & chooseFromList("Choisissez le mode de veille à utiliser en temps normal" & Battery_parentheses & " :", quickSleep) & "'"
-		do shell script "defaults write com.mattisg.deepsleep Battery_onLaunchMode '" & chooseFromList("Choisissez le mode de veille à utiliser en lançant Deep Sleep" & Battery_parentheses & " :", deepSleep) & "'"
+		do shell script "defaults write " & defaultsFile & " Battery_usualMode '" & chooseFromList("Choisissez le mode de veille à utiliser en temps normal" & Battery_parentheses & " :", quickSleep) & "'"
+		do shell script "defaults write " & defaultsFile & " Battery_onLaunchMode '" & chooseFromList("Choisissez le mode de veille à utiliser en lançant Deep Sleep" & Battery_parentheses & " :", deepSleep) & "'"
 	end if
 end setPrefs
 
@@ -175,8 +198,8 @@ on getPrefs()
 		set prefix to "Battery_"
 	end if
 	try
-		set onLaunchMode to do shell script "defaults read com.mattisg.deepsleep " & prefix & "onLaunchMode"
-		set usualMode to do shell script "defaults read com.mattisg.deepsleep " & prefix & "usualMode"
+		set onLaunchMode to do shell script "defaults read " & defaultsFile & " " & prefix & "onLaunchMode"
+		set usualMode to do shell script "defaults read " & defaultsFile & " " & prefix & "usualMode"
 	on error
 		display dialog "Les préférences de Deep Sleep sont illisibles. Veuillez choisir à nouveau vos préférences." with icon caution
 		setPrefs()
@@ -184,6 +207,26 @@ on getPrefs()
 end getPrefs
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+
+(*PASSWORD & CHOWN ISSUES*)
+on execIsNotRoot()
+	if (translateBool(do shell script "ls -l '" & execFile & "' | grep -q root' '*wheel; echo $?")) then
+		return false
+	else
+		return true
+	end if
+end execIsNotRoot
+
+on setOwner()
+	set choice to display dialog "Souhaitez-vous autoriser " & appName & " à être systématiquement exécuté en tant qu'administrateur ?" & return & "Dans le cas contraire, votre mot de passe vous sera demandé à chaque fois." & return & return & "Votre mot de passe ne sera pas stocké en clair." buttons {"Plus d'infos", "OK"} default button 2 with icon theIcon
+	if choice is {button returned:"Plus d'infos"} then
+		display dialog appName & " va vous demander votre mot de passe, pour s'autoriser à modifier le propriétaire du programme. Ainsi, " & appName & " sera identifié comme appartenant au système, et aura systématiquement les droits administrateurs nécessaires pour modifier le mode de veille." buttons {"OK"} default button 1 with icon theIcon
+	end if
+	do shell script "sudo chmod o+x '" & execFile & "'" with administrator privileges
+	set user to do shell script "whoami"
+	do shell script "su -c " & user & " 'sudo chown root:wheel \"" & execFile & "\" && sudo chmod u+s \"" & execFile & "\"'" with administrator privileges --thanks M. Beaumel (author of the Deep Sleep widget)
+end setOwner
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 (*MISCELLANEOUS*)
 on translateBool(int)
@@ -194,7 +237,7 @@ on translateBool(int)
 	end if
 end translateBool
 
-on realQuit()
+on realQuit() --Because, for some reason, AppleScript doesn't exit when used "quit" or "quit me" ! I've tried all the workarounds (with a boolean and exiting out of the loops, skipping the main process if we had to quit…), no one works.
 	do shell script "killall 'applet'"
 end realQuit
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------`
